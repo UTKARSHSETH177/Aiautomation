@@ -1,0 +1,194 @@
+{
+  "name": "LLM Skill Auto-Tagger",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tag-people",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wh-tag-people",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "tag-people"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:5001/people/untagged",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "limit", "value": "15" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-fetch-untagged",
+      "name": "Fetch Untagged",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.count }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "if-has-people",
+      "name": "Has Untagged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const people = $json.people || [];\nconst taxonomy = `Categories (pick exactly one per person):\n- automation-heavy: n8n, zapier, langchain, selenium, web scraping dominate (>=2 automation tools wins)\n- web-dev: react / javascript front-end dominates\n- backend: fastapi, rest apis, docker, python server work dominates\n- data: sql, mysql, mongodb, pandas dominate\n- mixed: real skills but no clear majority\n- unknown: no skill information at all`;\n\nconst payload = people.map(p => ({\n  person_id: p.person_id,\n  full_name: p.full_name,\n  city: p.city,\n  experience_years: p.experience_years,\n  naukri_skills: p.naukri_skills,\n  gig_skills: p.gig_skills\n}));\n\nconst prompt = `${taxonomy}\\n\\nClassify each person. Return ONLY a JSON array (no markdown) of objects:\\n[{ \"person_id\": number, \"skill_category\": string, \"confidence\": number between 0 and 1 }]\\n\\nPeople:\\n${JSON.stringify(payload, null, 2)}`;\n\nreturn [{ json: { prompt, batch_size: people.length } }];"
+      },
+      "id": "code-build-prompt",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{ \"text\": {{ JSON.stringify($json.prompt) }} }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0,\n    \"responseMimeType\": \"application/json\"\n  }\n}",
+        "options": {}
+      },
+      "id": "http-gemini",
+      "name": "Tag with Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 200],
+      "notesInFlow": true,
+      "notes": "Attach HTTP Query Auth credential with name=key and value=YOUR_GEMINI_API_KEY"
+    },
+    {
+      "parameters": {
+        "jsCode": "const VALID = new Set(['automation-heavy','web-dev','backend','data','mixed','unknown']);\nconst raw = $json.candidates?.[0]?.content?.parts?.[0]?.text || '[]';\nlet parsed;\ntry {\n  parsed = JSON.parse(raw.replace(/^```json\\s*|\\s*```$/g, '').trim());\n} catch (e) {\n  return [{ json: { error: 'gemini_parse_failed', raw, valid: [], invalid: [] } }];\n}\nif (!Array.isArray(parsed)) parsed = [parsed];\nconst valid = [];\nconst invalid = [];\nfor (const row of parsed) {\n  const cat = String(row.skill_category || '').trim().toLowerCase();\n  const pid = Number(row.person_id);\n  const conf = Number(row.confidence);\n  if (!Number.isInteger(pid) || !VALID.has(cat)) {\n    invalid.push(row);\n    continue;\n  }\n  valid.push({\n    person_id: pid,\n    skill_category: cat,\n    confidence: Number.isFinite(conf) ? Math.min(1, Math.max(0, conf)) : 0.5\n  });\n}\nreturn [{ json: { valid, invalid, skipped: invalid.length } }];"
+      },
+      "id": "code-validate",
+      "name": "Validate Categories",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.valid.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "if-has-valid",
+      "name": "Has Valid Tags?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1440, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:5001/people/tags",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.valid) }}",
+        "options": {}
+      },
+      "id": "http-write-tags",
+      "name": "Write Tags",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const write = $('Write Tags').item?.json || {};\nconst validate = $('Validate Categories').item.json;\nreturn [{ json: {\n  ok: true,\n  updated: write.updated ?? 0,\n  skipped_api: write.skipped || [],\n  invalid_llm: validate.invalid || [],\n  message: 'Batch tagged. Re-trigger webhook to process next batch of 15.'\n}}];"
+      },
+      "id": "code-success",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const v = $json;\nreturn [{ json: {\n  ok: false,\n  alert: 'no_valid_tags',\n  invalid_llm: v.invalid || [],\n  error: v.error || null,\n  message: 'Gemini returned no valid categories — nothing written.'\n}}];"
+      },
+      "id": "code-alert",
+      "name": "Alert Invalid",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, message: 'No untagged people left — idempotent no-op.' } }];"
+      },
+      "id": "code-noop",
+      "name": "Nothing To Do",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 420]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Fetch Untagged", "type": "main", "index": 0 }]]
+    },
+    "Fetch Untagged": {
+      "main": [[{ "node": "Has Untagged?", "type": "main", "index": 0 }]]
+    },
+    "Has Untagged?": {
+      "main": [
+        [{ "node": "Build Prompt", "type": "main", "index": 0 }],
+        [{ "node": "Nothing To Do", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Prompt": {
+      "main": [[{ "node": "Tag with Gemini", "type": "main", "index": 0 }]]
+    },
+    "Tag with Gemini": {
+      "main": [[{ "node": "Validate Categories", "type": "main", "index": 0 }]]
+    },
+    "Validate Categories": {
+      "main": [[{ "node": "Has Valid Tags?", "type": "main", "index": 0 }]]
+    },
+    "Has Valid Tags?": {
+      "main": [
+        [{ "node": "Write Tags", "type": "main", "index": 0 }],
+        [{ "node": "Alert Invalid", "type": "main", "index": 0 }]
+      ]
+    },
+    "Write Tags": {
+      "main": [[{ "node": "Success Response", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audio Collection — ConsultBae mini app</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 640px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    label { display: block; margin-top: .8rem; font-weight: 600; }
+    input[type="text"], input[type="tel"] {
+      box-sizing: border-box;
+      width: 100%;
+      padding: .5rem;
+    }
+    .tabs button { padding: .4rem 1rem; }
+    .tabs button.active { background: #222; color: #fff; }
+    .panel { border: 1px solid #ccc; padding: 1rem; margin-top: .5rem; }
+    .hidden { display: none; }
+    button.primary {
+      margin-top: 1rem;
+      padding: .6rem 1.4rem;
+      font-size: 1rem;
+    }
+    #result { margin-top: 1rem; padding: 1rem; border: 1px solid #ccc; }
+    #result.ok { border-color: #2a7; }
+    #result.err { border-color: #c33; }
+    table { border-collapse: collapse; margin-top: .7rem; }
+    td, th { border: 1px solid #ddd; padding: .3rem .6rem; text-align: left; }
+    .muted { color: #666; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Submit a recording</h1>
+  <p class="muted">
+    Mini audio collection app — records go into the Task 1 database.
+    <a href="/submissions">View all submissions →</a>
+  </p>
+
+  <label>
+    Name
+    <input type="text" id="name" autocomplete="name"
+           placeholder="Your full name">
+  </label>
+  <label>
+    Phone
+    <input type="tel" id="phone" autocomplete="tel"
+           placeholder="10-digit mobile (+91 / 0 prefix is fine)">
+  </label>
+
+  <p class="tabs" style="margin-top: 1rem">
+    <button type="button" id="tabRecord" class="active"
+            onclick="showTab('record')">🎙 Record</button>
+    <button type="button" id="tabUpload"
+            onclick="showTab('upload')">📁 Upload file</button>
+  </p>
+
+  <div id="panelRecord" class="panel">
+    <button type="button" id="btnStart"
+            onclick="startRec()">● Start recording</button>
+    <button type="button" id="btnStop" onclick="stopRec()" disabled>
+      ■ Stop
+    </button>
+    <span id="recStatus" class="muted">mic idle</span>
+    <p><audio id="preview" controls class="hidden"></audio></p>
+  </div>
+
+  <div id="panelUpload" class="panel hidden">
+    <input type="file" id="fileInput" accept="audio/*">
+  </div>
+
+  <button type="button" class="primary" id="btnSubmit"
+          onclick="submitAudio()">Submit</button>
+  <div id="result" class="hidden" role="status" aria-live="polite"></div>
+
+  <script src="/static/recorder.js"></script>
+</body>
+</html>
